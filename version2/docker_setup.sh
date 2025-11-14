@@ -70,6 +70,20 @@ patch_jenkins_network() {
   fi
 }
 
+ensure_jenkins_python_tools() {
+  if ! docker ps --format '{{.Names}}' | grep -qx "${JENKINS_CONTAINER}"; then
+    log "Jenkins container (${JENKINS_CONTAINER}) not running. Skipping python-venv install."
+    return
+  fi
+
+  log "Ensuring python3 + venv tooling is present inside ${JENKINS_CONTAINER}"
+  docker exec -u root "${JENKINS_CONTAINER}" bash -lc "
+    set -e
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip
+  "
+}
+
 verify_app() {
   log "Current v2 container status"
   docker ps --filter "name=${APP_CONTAINER}"
@@ -92,6 +106,7 @@ main() {
   build_v2_image
   deploy_v2_container
   patch_jenkins_network
+  ensure_jenkins_python_tools
   verify_app
 
   log "Done. Jenkins + ngrok setup stays untouched; v2 app runs independently on port ${APP_PORT}."
