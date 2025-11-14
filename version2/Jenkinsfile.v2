@@ -19,23 +19,27 @@ pipeline {
 
     stage('Unit Tests') {
         steps {
-            sh '''
-                python3 -m venv .venv
-                . .venv/bin/activate
-                pip install -r app/requirements.txt pytest
-                pytest -q
-                deactivate
-                rm -rf .venv
-            '''
+            dir('version2') {
+              sh '''
+                  python3 -m venv .venv
+                  . .venv/bin/activate
+                  pip install -r app/requirements.txt pytest
+                  pytest -q
+                  deactivate
+                  rm -rf .venv
+              '''
+            }
         }
     }
 
 
     stage('Build Image') {
       steps {
-        sh '''
-          docker build -t ${IMAGE_REPO}:${IMAGE_TAG} .
-        '''
+        dir('version2') {
+          sh '''
+            docker build -t ${IMAGE_REPO}:${IMAGE_TAG} .
+          '''
+        }
       }
     }
 
@@ -52,17 +56,19 @@ pipeline {
 
     stage('Deploy to K8s') {
       steps {
-        sh '''
-          # Render image tag into manifests and apply
-          mkdir -p build/k8s
-          sed "s/{{IMAGE_TAG}}/${IMAGE_TAG}/g" k8s/deployment.yaml > build/k8s/deployment.yaml
+        dir('version2') {
+          sh '''
+            # Render image tag into manifests and apply
+            mkdir -p build/k8s
+            sed "s/{{IMAGE_TAG}}/${IMAGE_TAG}/g" k8s/deployment.yaml > build/k8s/deployment.yaml
 
-          kubectl apply -f k8s/namespace.yaml
-          kubectl -n ${KUBE_NAMESPACE} apply -f build/k8s/deployment.yaml
-          kubectl -n ${KUBE_NAMESPACE} apply -f k8s/service.yaml
+            kubectl apply -f k8s/namespace.yaml
+            kubectl -n ${KUBE_NAMESPACE} apply -f build/k8s/deployment.yaml
+            kubectl -n ${KUBE_NAMESPACE} apply -f k8s/service.yaml
 
-          kubectl -n ${KUBE_NAMESPACE} rollout status deploy/data-cleaner --timeout=120s
-        '''
+            kubectl -n ${KUBE_NAMESPACE} rollout status deploy/data-cleaner --timeout=120s
+          '''
+        }
       }
     }
   }
