@@ -9,6 +9,10 @@ pipeline {
   }
 
   stages {
+    stage('init') {
+      steps { echo "Running pipeline from Jenkinsfile: ${env.JENKINSFILE_NAME}" }
+    }
+
     stage('Checkout') {
       steps { checkout scm }
     }
