@@ -1,79 +1,100 @@
 #!/bin/bash
+set -euo pipefail
 
-echo "==== STOPPING all running containers ===="
-docker stop $(docker ps -q) 2>/dev/null || true
+# This script provisions ONLY the resources required for the v2 application.
+# It intentionally avoids stopping/removing the shared Jenkins container or the
+# v1 application so both pipelines can share the same Jenkins+ngrok endpoint.
 
-echo "==== REMOVING all containers ===="
-docker rm -f $(docker ps -aq) 2>/dev/null || true
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NETWORK_NAME="${NETWORK_NAME:-mlops-net}"
+APP_NAME="${APP_NAME:-data-cleaner-v2}"
+APP_IMAGE="${APP_IMAGE:-${APP_NAME}:local}"
+APP_CONTAINER="${APP_CONTAINER:-${APP_NAME}}"
+APP_PORT="${APP_PORT:-8001}"          # host port dedicated to the v2 service
+JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 
-echo "==== REMOVING all images ===="
-docker rmi -f $(docker images -q) 2>/dev/null || true
+log() {
+  echo "==== $1 ===="
+}
 
-echo "==== REMOVING all volumes ===="
-docker volume rm $(docker volume ls -q) 2>/dev/null || true
+ensure_docker() {
+  if docker info >/dev/null 2>&1; then
+    return
+  fi
 
-echo "==== REMOVING all NON-default networks ===="
-docker network rm $(docker network ls | grep -v "bridge\|host\|none" | awk 'NR>1 {print $1}') 2>/dev/null || true
+  log "Docker daemon not reachable. Launching Docker Desktop..."
+  if command -v open >/dev/null 2>&1; then
+    open -a Docker || true
+  fi
 
-echo "==== ENSURING Docker Desktop is running ===="
-open -a Docker
-echo "Waiting for Docker to start..."
-until docker info >/dev/null 2>&1; do
-  sleep 2
-  echo "Still waiting for Docker..."
-done
-echo "Docker is ready."
+  until docker info >/dev/null 2>&1; do
+    sleep 2
+    echo "Waiting for Docker to start..."
+  done
+  log "Docker is ready."
+}
 
-echo "==== CREATING mlops-net NETWORK ===="
-docker network create mlops-net || true
+ensure_network() {
+  if docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
+    log "Docker network ${NETWORK_NAME} already exists."
+  else
+    log "Creating docker network ${NETWORK_NAME}"
+    docker network create "${NETWORK_NAME}"
+  fi
+}
 
-echo "==== BUILDING your data-cleaner image ===="
-docker build -t data-cleaner:local .
+build_v2_image() {
+  log "Building ${APP_IMAGE} from ${REPO_ROOT}/version2"
+  docker build -t "${APP_IMAGE}" "${REPO_ROOT}/version2"
+}
 
-echo "==== RUNNING data-cleaner container ===="
-docker run -d --name data-cleaner \
-  --network mlops-net \
-  -p 8000:8000 \
-  data-cleaner:local
+deploy_v2_container() {
+  if docker ps -a --format '{{.Names}}' | grep -qx "${APP_CONTAINER}"; then
+    log "Removing existing container ${APP_CONTAINER} to redeploy v2 app"
+    docker rm -f "${APP_CONTAINER}"
+  fi
 
-echo "==== VERIFYING data-cleaner is running ===="
-docker ps --filter name=data-cleaner
-curl -sS http://localhost:8000 || echo "App not responding yet."
+  log "Starting ${APP_CONTAINER} on port ${APP_PORT}"
+  docker run -d --name "${APP_CONTAINER}" \
+    --network "${NETWORK_NAME}" \
+    -p "${APP_PORT}:8000" \
+    "${APP_IMAGE}"
+}
 
-echo "==== CREATING Jenkins volume ===="
-docker volume create jenkins_home
+patch_jenkins_network() {
+  if docker ps --format '{{.Names}}' | grep -qx "${JENKINS_CONTAINER}"; then
+    log "Jenkins container (${JENKINS_CONTAINER}) detected. Ensuring it is connected to ${NETWORK_NAME}"
+    docker network connect "${NETWORK_NAME}" "${JENKINS_CONTAINER}" 2>/dev/null || true
+  else
+    log "Jenkins container (${JENKINS_CONTAINER}) not running. Skipping Jenkins setup."
+  fi
+}
 
-echo "==== RUNNING Jenkins container ===="
-docker run -d --name jenkins \
-  --network mlops-net \
-  -p 8080:8080 -p 50000:50000 \
-  -v jenkins_home:/var/jenkins_home \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  jenkins/jenkins:lts
+verify_app() {
+  log "Current v2 container status"
+  docker ps --filter "name=${APP_CONTAINER}"
 
-echo "==== INSTALLING docker CLI inside Jenkins ===="
-docker exec -u root jenkins bash -lc "apt-get update && apt-get install -y docker.io"
+  local health_url="http://localhost:${APP_PORT}/health"
+  log "Attempting health check on ${health_url}"
+  for attempt in {1..10}; do
+    if curl -fsS "${health_url}" >/dev/null; then
+      log "Health check passed on attempt ${attempt}"
+      return
+    fi
+    sleep 2
+  done
+  echo "Health check failed after multiple attempts; inspect logs with: docker logs ${APP_CONTAINER}"
+}
 
-echo "==== ADDING jenkins USER TO docker GROUP ===="
-docker exec -u root jenkins bash -lc "usermod -aG docker jenkins || true"
+main() {
+  ensure_docker
+  ensure_network
+  build_v2_image
+  deploy_v2_container
+  patch_jenkins_network
+  verify_app
 
-echo "==== INSTALLING JENKINS PLUGINS (using modern jenkins-plugin-cli) ===="
-docker exec -u root jenkins jenkins-plugin-cli --plugins "
-  workflow-aggregator
-  docker-workflow
-  git
-  github-branch-source
-  credentials-binding
-"
+  log "Done. Jenkins + ngrok setup stays untouched; v2 app runs independently on port ${APP_PORT}."
+}
 
-echo "==== RESTARTING Jenkins ===="
-docker restart jenkins
-
-echo "==== RETRIEVING Jenkins initial admin password ===="
-sleep 8
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
-
-echo "==== NGROK: Ensure you have authtoken configured ===="
-echo "Run if needed:  ngrok config add-authtoken <TOKEN>"
-echo "==== STARTING NGROK ON PORT 8080 ===="
-echo "ngrok http 8080"
+main "$@"
