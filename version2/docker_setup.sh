@@ -6,6 +6,7 @@ set -euo pipefail
 # v1 application so both pipelines can share the same Jenkins+ngrok endpoint.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+V1_SCRIPT="${REPO_ROOT}/v1_with_errors/docker_setup.sh"
 NETWORK_NAME="${NETWORK_NAME:-mlops-net}"
 APP_NAME="${APP_NAME:-data-cleaner-v2}"
 APP_IMAGE="${APP_IMAGE:-${APP_NAME}:local}"
@@ -15,6 +16,18 @@ JENKINS_CONTAINER="${JENKINS_CONTAINER:-jenkins}"
 
 log() {
   echo "==== $1 ===="
+}
+
+run_v1_setup() {
+  if [[ -x "${V1_SCRIPT}" ]]; then
+    log "Running v1 setup script at ${V1_SCRIPT}"
+    "${V1_SCRIPT}"
+  elif [[ -f "${V1_SCRIPT}" ]]; then
+    log "v1 setup script found at ${V1_SCRIPT} but not executable. Running via bash."
+    bash "${V1_SCRIPT}"
+  else
+    log "v1 setup script ${V1_SCRIPT} not found; skipping."
+  fi
 }
 
 ensure_docker() {
@@ -145,6 +158,7 @@ verify_app() {
 
 main() {
   ensure_docker
+  run_v1_setup
   ensure_network
   build_v2_image
   deploy_v2_container
