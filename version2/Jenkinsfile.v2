@@ -6,6 +6,7 @@ pipeline {
     IMAGE_REPO = "${env.IMAGE_REPO ?: 'ghcr.io/aravindsatyan/data-cleaner'}"
     IMAGE_TAG = "${env.BUILD_NUMBER}"
     DOCKER_BUILDKIT = "1"
+    KUBE_CONFIG_CRED = "${env.KUBE_CONFIG_CRED ?: ''}"
   }
 
   stages {
@@ -55,19 +56,25 @@ pipeline {
     }
 
     stage('Deploy to K8s') {
+      when {
+        expression { env.KUBE_CONFIG_CRED?.trim() }
+      }
       steps {
         dir('version2') {
-          sh '''
-            # Render image tag into manifests and apply
-            mkdir -p build/k8s
-            sed "s/{{IMAGE_TAG}}/${IMAGE_TAG}/g" k8s/deployment.yaml > build/k8s/deployment.yaml
+          withCredentials([file(credentialsId: env.KUBE_CONFIG_CRED, variable: 'KUBECONFIG_FILE')]) {
+            sh '''
+              export KUBECONFIG="${KUBECONFIG_FILE}"
+              # Render image tag into manifests and apply
+              mkdir -p build/k8s
+              sed "s/{{IMAGE_TAG}}/${IMAGE_TAG}/g" k8s/deployment.yaml > build/k8s/deployment.yaml
 
-            kubectl apply -f k8s/namespace.yaml
-            kubectl -n ${KUBE_NAMESPACE} apply -f build/k8s/deployment.yaml
-            kubectl -n ${KUBE_NAMESPACE} apply -f k8s/service.yaml
+              kubectl apply -f k8s/namespace.yaml
+              kubectl -n ${KUBE_NAMESPACE} apply -f build/k8s/deployment.yaml
+              kubectl -n ${KUBE_NAMESPACE} apply -f k8s/service.yaml
 
-            kubectl -n ${KUBE_NAMESPACE} rollout status deploy/data-cleaner --timeout=120s
-          '''
+              kubectl -n ${KUBE_NAMESPACE} rollout status deploy/data-cleaner --timeout=120s
+            '''
+          }
         }
       }
     }
