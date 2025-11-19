@@ -166,3 +166,6 @@ ngrok http 8080
 - If containers can't reach the host Docker, confirm "Expose daemon on tcp://localhost:2375 without TLS" is enabled and that host.docker.internal resolves inside containers.
 - If ports are in use, change the -p host:container mappings.
 - Use docker logs <container> to inspect container output.
+
+
+check v2
