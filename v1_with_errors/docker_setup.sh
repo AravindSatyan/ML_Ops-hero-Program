@@ -44,12 +44,14 @@ echo "==== CREATING Jenkins volume ===="
 docker volume create jenkins_home
 
 echo "==== RUNNING Jenkins container ===="
+echo "==== RUNNING Jenkins container ===="
 docker run -d --name jenkins \
   --network mlops-net \
   -p 8080:8080 -p 50000:50000 \
   -v jenkins_home:/var/jenkins_home \
-  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e DOCKER_HOST=tcp://host.docker.internal:2375 \
   jenkins/jenkins:lts
+
 
 echo "==== INSTALLING docker CLI inside Jenkins ===="
 docker exec -u root jenkins bash -lc "apt-get update && apt-get install -y docker.io"
@@ -72,6 +74,7 @@ docker restart jenkins
 echo "==== RETRIEVING Jenkins initial admin password ===="
 sleep 8
 docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+
 
 echo "==== NGROK: Ensure you have authtoken configured ===="
 echo "Run if needed:  ngrok config add-authtoken <TOKEN>"
