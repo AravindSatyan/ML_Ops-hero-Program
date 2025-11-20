@@ -46,7 +46,7 @@ pipeline {
 
     stage('Login & Push') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'REGISTRY_CREDS', usernameVariable: 'USER', passwordVariable: 'TOKEN')]) {
+        withCredentials([usernamePassword(credentialsId: 'b68c4ae3116d403db4c72018d06fbe54', usernameVariable: 'USER', passwordVariable: 'TOKEN')]) {
           sh '''
             echo "${TOKEN}" | docker login ${REGISTRY} -u "${USER}" --password-stdin
             docker push ${IMAGE_REPO}:${IMAGE_TAG}

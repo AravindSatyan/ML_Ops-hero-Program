@@ -9,8 +9,10 @@ docker rm -f $(docker ps -aq) 2>/dev/null || true
 echo "==== REMOVING all images ===="
 docker rmi -f $(docker images -q) 2>/dev/null || true
 
-echo "==== REMOVING all volumes ===="
-docker volume rm $(docker volume ls -q) 2>/dev/null || true
+# echo "==== REMOVING all volumes ===="
+# docker volume rm $(docker volume ls -q) 2>/dev/null || true
+echo "==== REMOVING all volumes except jenkins_home ===="
+docker volume ls -q | grep -v '^jenkins_home$' | xargs -r docker volume rm
 
 echo "==== REMOVING all NON-default networks ===="
 docker network rm $(docker network ls | grep -v "bridge\|host\|none" | awk 'NR>1 {print $1}') 2>/dev/null || true
